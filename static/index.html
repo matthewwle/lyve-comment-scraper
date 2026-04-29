@@ -217,6 +217,10 @@
       animation: fadeIn 0.2s ease;
     }
     .comment-row:hover { background: #1a1a1a; }
+    .comment-row.selected { background: #ffffff !important; }
+    .comment-row.selected .ts,
+    .comment-row.selected .user,
+    .comment-row.selected .text { color: #000000 !important; }
 
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(4px); }
@@ -453,6 +457,7 @@
       `<span class="ts">${escapeHtml(msg.ts)}</span>` +
       `<span class="user">${escapeHtml(msg.user)}</span>` +
       `<span class="text">${escapeHtml(msg.text)}</span>`;
+    row.addEventListener("click", () => row.classList.toggle("selected"));
     feed.appendChild(row);
 
     totalCount++;

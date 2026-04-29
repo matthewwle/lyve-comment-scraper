@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lyve Comment Scraper</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Login screen ─────────────────────────────────────────── */
+    #login-screen {
+      position: fixed;
+      inset: 0;
+      background: #0f0f0f;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    #login-screen.hidden { display: none; }
+
+    #login-box {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 16px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 380px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    #login-box img { height: 48px; width: auto; margin-bottom: 4px; }
+
+    #login-box h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+
+    #login-box input {
+      width: 100%;
+      background: #262626;
+      border: 1px solid #3a3a3a;
+      border-radius: 8px;
+      padding: 11px 14px;
+      color: #e0e0e0;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    #login-box input:focus { border-color: #ff3b5c; }
+    #login-box input::placeholder { color: #555; }
+
+    #login-btn {
+      width: 100%;
+      background: #ff3b5c;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-top: 4px;
+    }
+    #login-btn:hover { background: #e02e50; }
+    #login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #login-error {
+      font-size: 13px;
+      color: #ff6b6b;
+      min-height: 18px;
+      text-align: center;
+    }
+
+    /* ── Main app ─────────────────────────────────────────────── */
+    #app { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+    #app.hidden { display: none; }
+
+    header {
+      background: #1a1a1a;
+      border-bottom: 1px solid #2a2a2a;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    #url-input {
+      flex: 1;
+      min-width: 260px;
+      background: #262626;
+      border: 1px solid #3a3a3a;
+      border-radius: 8px;
+      padding: 9px 14px;
+      color: #e0e0e0;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    #url-input:focus { border-color: #ff3b5c; }
+    #url-input::placeholder { color: #666; }
+
+    .limit-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      font-size: 13px;
+      color: #999;
+    }
+    #limit-input {
+      width: 72px;
+      background: #262626;
+      border: 1px solid #3a3a3a;
+      border-radius: 8px;
+      padding: 9px 10px;
+      color: #e0e0e0;
+      font-size: 14px;
+      outline: none;
+      text-align: center;
+      transition: border-color 0.15s;
+    }
+    #limit-input:focus { border-color: #ff3b5c; }
+
+    button {
+      border: none;
+      border-radius: 8px;
+      padding: 9px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, background 0.15s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #start-btn { background: #ff3b5c; color: #fff; }
+    #start-btn:not(:disabled):hover { background: #e02e50; }
+
+    #stop-btn { background: #333; color: #ccc; }
+    #stop-btn:not(:disabled):hover { background: #444; }
+
+    #signout-btn {
+      background: transparent;
+      color: #555;
+      font-size: 13px;
+      padding: 6px 12px;
+      border: 1px solid #333;
+      margin-left: auto;
+    }
+    #signout-btn:hover { color: #999; border-color: #555; }
+
+    #status-badge {
+      font-size: 13px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 20px;
+      white-space: nowrap;
+      background: #222;
+      color: #666;
+      transition: all 0.2s;
+    }
+    #status-badge.live        { background: #1a1a1a; color: #ff3b5c; border: 1px solid #ff3b5c; }
+    #status-badge.connecting  { background: #1a2a1a; color: #4caf50; border: 1px solid #4caf50; }
+    #status-badge.error       { background: #2a1a1a; color: #ff6b6b; border: 1px solid #ff6b6b; }
+
+    #error-bar {
+      display: none;
+      background: #2a1a1a;
+      border-bottom: 1px solid #5a2a2a;
+      padding: 8px 20px;
+      font-size: 13px;
+      color: #ff6b6b;
+    }
+
+    #stats-bar {
+      background: #161616;
+      border-bottom: 1px solid #222;
+      padding: 6px 20px;
+      font-size: 12px;
+      color: #555;
+      display: flex;
+      gap: 16px;
+    }
+
+    #comment-feed {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .comment-row {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      padding: 6px 10px;
+      border-radius: 6px;
+      transition: background 0.1s;
+      animation: fadeIn 0.2s ease;
+    }
+    .comment-row:hover { background: #1a1a1a; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .ts   { font-size: 11px; color: #ffffff; white-space: nowrap; min-width: 60px; }
+    .user { font-size: var(--comment-font-size, 16px); font-weight: 700; color: #ffffff; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+    .text { font-size: var(--comment-font-size, 16px); color: #ddd; line-height: 1.4; word-break: break-word; }
+
+    .size-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      font-size: 13px;
+      color: #999;
+    }
+    #font-size-slider {
+      width: 80px;
+      accent-color: #ff3b5c;
+      cursor: pointer;
+    }
+
+    #scroll-btn {
+      display: none;
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #ff3b5c;
+      color: #fff;
+      border: none;
+      border-radius: 24px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(255,59,92,0.4);
+    }
+
+    #empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #444;
+      font-size: 15px;
+      gap: 8px;
+      pointer-events: none;
+    }
+    #empty-state .icon { font-size: 40px; }
+  </style>
+</head>
+<body>
+
+<!-- Login screen -->
+<div id="login-screen">
+  <div id="login-box">
+    <img src="/assets/Lyve-Gradient-Icon.png" alt="Lyve" />
+    <h2>Sign in</h2>
+    <input id="login-email" type="email" placeholder="you@lyvestudio.com" autocomplete="email" />
+    <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" />
+    <button id="login-btn">Sign In</button>
+    <p id="login-error"></p>
+  </div>
+</div>
+
+<!-- Main app -->
+<div id="app" class="hidden">
+  <header>
+    <img src="/assets/Lyve-Gradient-Icon.png" alt="Lyve" style="height: 36px; width: auto;" />
+    <input id="url-input" type="text" placeholder="https://www.tiktok.com/@username/live" autocomplete="off" spellcheck="false" />
+    <div class="limit-wrap">
+      Last
+      <input id="limit-input" type="number" value="200" min="10" max="2000" />
+      comments
+    </div>
+    <div class="size-wrap">
+      Size: <span id="font-size-label">16px</span>
+      <input id="font-size-slider" type="range" min="12" max="32" step="1" value="16" />
+    </div>
+    <button id="start-btn">Start</button>
+    <button id="stop-btn" disabled>Stop</button>
+    <span id="status-badge">Idle</span>
+    <button id="signout-btn">Sign out</button>
+  </header>
+
+  <div id="error-bar"></div>
+
+  <div id="stats-bar">
+    <span id="stat-count">0 comments received</span>
+    <span id="stat-user"></span>
+  </div>
+
+  <div id="comment-feed">
+    <div id="empty-state">
+      <span class="icon">💬</span>
+      <span>Paste a TikTok live URL above and click Start</span>
+    </div>
+  </div>
+</div>
+
+<button id="scroll-btn">↓ Jump to latest</button>
+
+<script>
+  // ── Auth helpers ──────────────────────────────────────────────
+  const TOKEN_KEY = "lyve_token";
+
+  function getToken() { return localStorage.getItem(TOKEN_KEY); }
+  function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
+  function clearToken() { localStorage.removeItem(TOKEN_KEY); }
+
+  function authHeaders() {
+    return {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + getToken(),
+    };
+  }
+
+  // ── Screen switching ──────────────────────────────────────────
+  const loginScreen = document.getElementById("login-screen");
+  const appDiv      = document.getElementById("app");
+
+  function showLoginScreen() {
+    loginScreen.classList.remove("hidden");
+    appDiv.classList.add("hidden");
+  }
+
+  function showApp() {
+    loginScreen.classList.add("hidden");
+    appDiv.classList.remove("hidden");
+  }
+
+  // ── On page load: check for stored token ──────────────────────
+  if (getToken()) {
+    showApp();
+  } else {
+    showLoginScreen();
+  }
+
+  // ── Login form ────────────────────────────────────────────────
+  const loginBtn      = document.getElementById("login-btn");
+  const loginEmail    = document.getElementById("login-email");
+  const loginPassword = document.getElementById("login-password");
+  const loginError    = document.getElementById("login-error");
+
+  async function doLogin() {
+    const email    = loginEmail.value.trim();
+    const password = loginPassword.value;
+    loginError.textContent = "";
+    loginBtn.disabled = true;
+    loginBtn.textContent = "Signing in…";
+
+    try {
+      const res = await fetch("/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setToken(data.token);
+        showApp();
+      } else {
+        loginError.textContent = data.detail || "Invalid email or password";
+      }
+    } catch {
+      loginError.textContent = "Could not reach server.";
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = "Sign In";
+    }
+  }
+
+  loginBtn.addEventListener("click", doLogin);
+  loginPassword.addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
+  loginEmail.addEventListener("keydown", (e) => { if (e.key === "Enter") loginPassword.focus(); });
+
+  // ── Sign out ──────────────────────────────────────────────────
+  document.getElementById("signout-btn").addEventListener("click", async () => {
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    await fetch("/logout", { method: "POST", headers: authHeaders() }).catch(() => {});
+    clearToken();
+    showLoginScreen();
+    loginEmail.value = "";
+    loginPassword.value = "";
+  });
+
+  // ── Main app vars ─────────────────────────────────────────────
+  const urlInput    = document.getElementById("url-input");
+  const limitInput  = document.getElementById("limit-input");
+  const startBtn    = document.getElementById("start-btn");
+  const stopBtn     = document.getElementById("stop-btn");
+  const statusBadge = document.getElementById("status-badge");
+  const errorBar    = document.getElementById("error-bar");
+  const feed        = document.getElementById("comment-feed");
+  const scrollBtn   = document.getElementById("scroll-btn");
+  const statCount   = document.getElementById("stat-count");
+  const statUser    = document.getElementById("stat-user");
+
+  let evtSource   = null;
+  let autoScroll  = true;
+  let totalCount  = 0;
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function setStatus(cls, label) {
+    statusBadge.className = cls;
+    statusBadge.textContent = label;
+  }
+
+  function showError(msg) {
+    errorBar.textContent = "Error: " + msg;
+    errorBar.style.display = "block";
+  }
+
+  function clearError() {
+    errorBar.style.display = "none";
+    errorBar.textContent = "";
+  }
+
+  function appendComment(msg) {
+    const es = document.getElementById("empty-state");
+    if (es) es.remove();
+
+    const row = document.createElement("div");
+    row.className = "comment-row";
+    row.innerHTML =
+      `<span class="ts">${escapeHtml(msg.ts)}</span>` +
+      `<span class="user">${escapeHtml(msg.user)}</span>` +
+      `<span class="text">${escapeHtml(msg.text)}</span>`;
+    feed.appendChild(row);
+
+    totalCount++;
+    statCount.textContent = totalCount + " comments received";
+    enforceLimit();
+    if (autoScroll) feed.scrollTop = feed.scrollHeight;
+  }
+
+  function enforceLimit() {
+    const limit = parseInt(limitInput.value) || 200;
+    while (feed.children.length > limit) feed.removeChild(feed.firstChild);
+  }
+
+  feed.addEventListener("scroll", () => {
+    const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 30;
+    autoScroll = atBottom;
+    scrollBtn.style.display = atBottom ? "none" : "block";
+  });
+
+  scrollBtn.addEventListener("click", () => {
+    autoScroll = true;
+    scrollBtn.style.display = "none";
+    feed.scrollTop = feed.scrollHeight;
+  });
+
+  function openStream() {
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    const token = getToken();
+    evtSource = new EventSource(`/stream?token=${encodeURIComponent(token)}`);
+
+    evtSource.onmessage = (e) => {
+      if (!e.data) return;
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      if (msg.type === "heartbeat") return;
+      if (msg.type === "comment") appendComment(msg);
+      else if (msg.type === "status") handleStatusMsg(msg);
+    };
+
+    evtSource.onerror = () => setStatus("error", "Connection lost");
+  }
+
+  function handleStatusMsg(msg) {
+    if (msg.status === "live") {
+      setStatus("live", "🔴 LIVE");
+      clearError();
+      statUser.textContent = msg.user ? "Watching " + msg.user : "";
+    } else if (msg.status === "disconnected" || msg.status === "idle") {
+      setStatus("", "Idle");
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statUser.textContent = "";
+    } else if (msg.status === "error") {
+      setStatus("error", "Error");
+      showError(msg.msg || "Unknown error");
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+  }
+
+  startBtn.addEventListener("click", async () => {
+    const url   = urlInput.value.trim();
+    const limit = parseInt(limitInput.value) || 200;
+    if (!url) { showError("Please enter a TikTok live URL."); return; }
+
+    clearError();
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    setStatus("connecting", "Connecting…");
+
+    feed.innerHTML = "";
+    totalCount = 0;
+    statCount.textContent = "0 comments received";
+    statUser.textContent = "";
+    autoScroll = true;
+    scrollBtn.style.display = "none";
+
+    try {
+      const res  = await fetch("/start", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ url, limit }),
+      });
+      const data = await res.json();
+
+      if (res.status === 401) {
+        clearToken(); showLoginScreen(); return;
+      }
+      if (!data.ok) {
+        showError(data.error || "Failed to start.");
+        setStatus("error", "Error");
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        return;
+      }
+      openStream();
+    } catch {
+      showError("Could not reach server.");
+      setStatus("error", "Error");
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+  });
+
+  stopBtn.addEventListener("click", async () => {
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    await fetch("/stop", { method: "POST", headers: authHeaders() });
+    setStatus("", "Idle");
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    statUser.textContent = "";
+  });
+
+  const fontSlider = document.getElementById("font-size-slider");
+  const fontLabel  = document.getElementById("font-size-label");
+  fontSlider.addEventListener("input", () => {
+    const size = fontSlider.value + "px";
+    fontLabel.textContent = size;
+    feed.style.setProperty("--comment-font-size", size);
+  });
+
+  urlInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !startBtn.disabled) startBtn.click();
+  });
+</script>
+</body>
+</html>

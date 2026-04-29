@@ -29,16 +29,25 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 
-# ── Scraper state ──────────────────────────────────────────────────────────────
-state: dict = {
-    "client":    None,
-    "task":      None,
-    "comments":  deque(maxlen=200),
-    "limit":     200,
-    "status":    "idle",
-    "error_msg": "",
-    "clients":   set(),
-}
+# ── Per-user sessions ──────────────────────────────────────────────────────────
+# Keyed by user email. Each user gets their own independent scraper session.
+sessions: dict[str, dict] = {}
+
+
+def get_session(user: str) -> dict:
+    """Return existing session for user, or create a fresh one."""
+    if user not in sessions:
+        sessions[user] = {
+            "client":    None,
+            "task":      None,
+            "comments":  deque(maxlen=200),
+            "limit":     200,
+            "status":    "idle",
+            "error_msg": "",
+            "clients":   set(),   # asyncio.Queue per SSE browser tab
+        }
+    return sessions[user]
+
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 security = HTTPBearer(auto_error=False)
@@ -90,14 +99,15 @@ async def logout() -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
-# ── Protected routes ───────────────────────────────────────────────────────────
+# ── Protected routes (all scoped to the authenticated user) ────────────────────
 
 @app.get("/status")
 async def get_status(user: str = Depends(require_auth)) -> JSONResponse:
+    session = get_session(user)
     return JSONResponse({
-        "status":        state["status"],
-        "error":         state["error_msg"],
-        "comment_count": len(state["comments"]),
+        "status":        session["status"],
+        "error":         session["error_msg"],
+        "comment_count": len(session["comments"]),
     })
 
 
@@ -106,24 +116,25 @@ async def start_scraper(payload: dict, user: str = Depends(require_auth)) -> JSO
     url   = payload.get("url", "").strip()
     limit = max(10, min(2000, int(payload.get("limit", 200))))
 
-    await _stop_current()
+    session = get_session(user)
+    await _stop_current(session)
 
     try:
         unique_id = extract_unique_id(url)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
-    state["limit"]    = limit
-    state["comments"] = deque(maxlen=limit)
-    state["status"]   = "connecting"
+    session["limit"]    = limit
+    session["comments"] = deque(maxlen=limit)
+    session["status"]   = "connecting"
 
     client = TikTokLiveClient(unique_id=unique_id)
-    state["client"] = client
+    session["client"] = client
 
     @client.on(ConnectEvent)
     async def on_connect(event: ConnectEvent) -> None:
-        state["status"] = "live"
-        await _broadcast({"type": "status", "status": "live", "user": unique_id})
+        session["status"] = "live"
+        await _broadcast(session, {"type": "status", "status": "live", "user": unique_id})
 
     @client.on(CommentEvent)
     async def on_comment(event: CommentEvent) -> None:
@@ -134,31 +145,34 @@ async def start_scraper(payload: dict, user: str = Depends(require_auth)) -> JSO
             "user": event.user.nickname,
             "text": event.comment,
         }
-        state["comments"].append(entry)
-        await _broadcast(entry)
+        session["comments"].append(entry)
+        await _broadcast(session, entry)
 
     @client.on(DisconnectEvent)
     async def on_disconnect(event: DisconnectEvent) -> None:
-        state["status"] = "idle"
-        await _broadcast({"type": "status", "status": "disconnected"})
+        session["status"] = "idle"
+        await _broadcast(session, {"type": "status", "status": "disconnected"})
 
-    state["task"] = asyncio.create_task(_run_client(client))
+    session["task"] = asyncio.create_task(_run_client(session, client))
     return JSONResponse({"ok": True, "user": unique_id})
 
 
 @app.post("/stop")
 async def stop_scraper(user: str = Depends(require_auth)) -> JSONResponse:
-    await _stop_current()
-    await _broadcast({"type": "status", "status": "idle"})
+    session = get_session(user)
+    await _stop_current(session)
+    await _broadcast(session, {"type": "status", "status": "idle"})
     return JSONResponse({"ok": True})
 
 
 @app.get("/stream")
 async def stream(request: Request, user: str = Depends(require_auth)) -> EventSourceResponse:
+    session = get_session(user)
     queue: asyncio.Queue = asyncio.Queue(maxsize=500)
-    state["clients"].add(queue)
+    session["clients"].add(queue)
 
-    for comment in list(state["comments"]):
+    # Replay current rolling window immediately to this new tab
+    for comment in list(session["comments"]):
         await queue.put(comment)
 
     async def event_generator():
@@ -172,12 +186,12 @@ async def stream(request: Request, user: str = Depends(require_auth)) -> EventSo
                 except asyncio.TimeoutError:
                     yield {"data": json.dumps({"type": "heartbeat"})}
         finally:
-            state["clients"].discard(queue)
+            session["clients"].discard(queue)
 
     return EventSourceResponse(event_generator())
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ── Internal helpers ───────────────────────────────────────────────────────────
 
 def extract_unique_id(url: str) -> str:
     from urllib.parse import urlparse
@@ -187,40 +201,40 @@ def extract_unique_id(url: str) -> str:
     return path_parts[0]
 
 
-async def _broadcast(data: dict) -> None:
+async def _broadcast(session: dict, data: dict) -> None:
     dead = set()
-    for q in state["clients"]:
+    for q in session["clients"]:
         try:
             q.put_nowait(data)
         except asyncio.QueueFull:
             dead.add(q)
-    state["clients"] -= dead
+    session["clients"] -= dead
 
 
-async def _run_client(client: TikTokLiveClient) -> None:
+async def _run_client(session: dict, client: TikTokLiveClient) -> None:
     try:
         await client.start(fetch_live_check=True)
     except Exception as exc:
-        state["status"]    = "error"
-        state["error_msg"] = str(exc)
-        await _broadcast({"type": "status", "status": "error", "msg": str(exc)})
+        session["status"]    = "error"
+        session["error_msg"] = str(exc)
+        await _broadcast(session, {"type": "status", "status": "error", "msg": str(exc)})
 
 
-async def _stop_current() -> None:
-    client = state.get("client")
+async def _stop_current(session: dict) -> None:
+    client = session.get("client")
     if client:
         try:
             await client.disconnect()
         except Exception:
             pass
-    task = state.get("task")
+    task = session.get("task")
     if task and not task.done():
         task.cancel()
         try:
             await task
         except (asyncio.CancelledError, Exception):
             pass
-    state["client"]    = None
-    state["task"]      = None
-    state["status"]    = "idle"
-    state["error_msg"] = ""
+    session["client"]    = None
+    session["task"]      = None
+    session["status"]    = "idle"
+    session["error_msg"] = ""

@@ -87,11 +87,27 @@ async def login(payload: dict) -> JSONResponse:
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         return JSONResponse({
-            "token": res.session.access_token,
-            "email": res.user.email,
+            "token":         res.session.access_token,
+            "refresh_token": res.session.refresh_token,
+            "email":         res.user.email,
         })
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+
+@app.post("/refresh")
+async def refresh_token(payload: dict) -> JSONResponse:
+    refresh_token = payload.get("refresh_token", "")
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="refresh_token required")
+    try:
+        res = supabase.auth.refresh_session(refresh_token)
+        return JSONResponse({
+            "token":         res.session.access_token,
+            "refresh_token": res.session.refresh_token,
+        })
+    except Exception:
+        raise HTTPException(status_code=401, detail="Could not refresh session")
 
 
 @app.post("/logout")

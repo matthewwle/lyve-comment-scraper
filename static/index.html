@@ -328,11 +328,14 @@
 
 <script>
   // ── Auth helpers ──────────────────────────────────────────────
-  const TOKEN_KEY = "lyve_token";
+  const TOKEN_KEY         = "lyve_token";
+  const REFRESH_TOKEN_KEY = "lyve_refresh_token";
 
-  function getToken() { return localStorage.getItem(TOKEN_KEY); }
-  function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
-  function clearToken() { localStorage.removeItem(TOKEN_KEY); }
+  function getToken()          { return localStorage.getItem(TOKEN_KEY); }
+  function setToken(t)         { localStorage.setItem(TOKEN_KEY, t); }
+  function clearToken()        { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(REFRESH_TOKEN_KEY); }
+  function getRefreshToken()   { return localStorage.getItem(REFRESH_TOKEN_KEY); }
+  function setRefreshToken(t)  { localStorage.setItem(REFRESH_TOKEN_KEY, t); }
 
   function authHeaders() {
     return {
@@ -384,6 +387,7 @@
       const data = await res.json();
       if (res.ok) {
         setToken(data.token);
+        if (data.refresh_token) setRefreshToken(data.refresh_token);
         showApp();
       } else {
         loginError.textContent = data.detail || "Invalid email or password";
@@ -483,8 +487,31 @@
     feed.scrollTop = feed.scrollHeight;
   });
 
+  let reconnectTimer = null;
+
+  async function silentRefresh() {
+    const rt = getRefreshToken();
+    if (!rt) return false;
+    try {
+      const res = await fetch("/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      setToken(data.token);
+      setRefreshToken(data.refresh_token);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function openStream() {
     if (evtSource) { evtSource.close(); evtSource = null; }
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
     const token = getToken();
     evtSource = new EventSource(`/stream?token=${encodeURIComponent(token)}`);
 
@@ -497,7 +524,21 @@
       else if (msg.type === "status") handleStatusMsg(msg);
     };
 
-    evtSource.onerror = () => setStatus("error", "Connection lost");
+    evtSource.onerror = () => {
+      evtSource.close();
+      evtSource = null;
+      // Silently refresh token and reconnect — user sees nothing
+      reconnectTimer = setTimeout(async () => {
+        const refreshed = await silentRefresh();
+        if (refreshed) {
+          openStream();
+        } else {
+          // Refresh token also expired — force re-login
+          clearToken();
+          showLoginScreen();
+        }
+      }, 1500);
+    };
   }
 
   function handleStatusMsg(msg) {

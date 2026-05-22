@@ -144,7 +144,7 @@ async def start_scraper(payload: dict, user: str = Depends(require_auth)) -> JSO
     session["comments"] = deque(maxlen=limit)
     session["status"]   = "connecting"
 
-    client = TikTokLiveClient(unique_id=unique_id)
+    client = TikTokLiveClient(unique_id=unique_id, sign_api_key=os.environ.get("SIGN_API_KEY"))
     session["client"] = client
 
     @client.on(ConnectEvent)

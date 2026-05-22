@@ -158,7 +158,7 @@ async def start_scraper(payload: dict, user: str = Depends(require_auth)) -> JSO
         entry = {
             "type": "comment",
             "ts":   ts,
-            "user": event.user.nickname,
+            "user": event.user.nick_name,
             "text": event.comment,
         }
         session["comments"].append(entry)
